@@ -67,6 +67,42 @@ a {
   border-color: #4a90e2;
 }
 
+/* Date input specific styling */
+.form-group input[type="date"] {
+  position: relative;
+  padding-right: 40px;
+  cursor: pointer;
+}
+
+.form-group input[type="date"]::-webkit-calendar-picker-indicator {
+  position: absolute;
+  right: 10px;
+  cursor: pointer;
+  opacity: 0.6;
+  width: 20px;
+  height: 20px;
+  background-size: contain;
+}
+
+.form-group input[type="date"]::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
+}
+
+.form-group input[type="date"]::-webkit-inner-spin-button,
+.form-group input[type="date"]::-webkit-clear-button {
+  display: none;
+}
+
+/* Firefox date input styling */
+.form-group input[type="date"]::-moz-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.6;
+}
+
+.form-group input[type="date"]::-moz-calendar-picker-indicator:hover {
+  opacity: 1;
+}
+
 .btn {
   padding: 10px 20px;
   border: none;
@@ -126,6 +162,21 @@ a {
 .status-error {
   background-color: #f8d7da;
   color: #721c24;
+}
+
+.status-retrying_errors {
+  background-color: #ff9800;
+  color: white;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
 }
 
 .table {

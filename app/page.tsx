@@ -7,7 +7,8 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
 interface JobStatus {
   jobId: string;
-  searchName: string | null;
+  searchName: string | null; // Keep for backward compatibility
+  searchNames?: string[]; // New: array of search names
   foundDates: Array<{
     date: string;
     records: Array<{
@@ -20,6 +21,7 @@ interface JobStatus {
       matchScore?: number;
       matchedField?: 'name' | 'fathersName' | 'mothersName';
       matchedPart?: string;
+      matchedSearchName?: string; // Which search name matched
     }>;
     totalRecordsOnDate?: number;
   }>;
@@ -40,6 +42,8 @@ interface JobStatus {
     error: string;
     timestamp: string;
   }>;
+  errorDates?: string[];
+  retryingErrors?: boolean;
 }
 
 export default function Home() {
@@ -48,7 +52,7 @@ export default function Home() {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [gender, setGender] = useState('male');
-  const [searchName, setSearchName] = useState('');
+  const [searchNames, setSearchNames] = useState<string[]>(['']);
   const [intervalMinutes, setIntervalMinutes] = useState(60);
   const [currentJobId, setCurrentJobId] = useState<string | null>(null);
   const [jobStatus, setJobStatus] = useState<JobStatus | null>(null);
@@ -93,7 +97,7 @@ export default function Home() {
         startDate,
         endDate,
         gender,
-        searchName: searchName || undefined,
+        searchNames: searchNames.filter(name => name.trim() !== ''),
         intervalMinutes: parseInt(intervalMinutes.toString())
       });
 
@@ -221,15 +225,63 @@ export default function Home() {
           </div>
 
           <div className="form-group">
-            <label htmlFor="searchName">Search Name (optional)</label>
-            <input
-              id="searchName"
-              type="text"
-              value={searchName}
-              onChange={(e) => setSearchName(e.target.value)}
-              placeholder="Enter name to search for in records"
+            <label>Search Names (optional)</label>
+            {searchNames.map((name, index) => (
+              <div key={index} style={{ display: 'flex', gap: '8px', marginBottom: '8px', alignItems: 'center' }}>
+                <input
+                  type="text"
+                  value={name}
+                  onChange={(e) => {
+                    const newNames = [...searchNames];
+                    newNames[index] = e.target.value;
+                    setSearchNames(newNames);
+                  }}
+                  placeholder={`Enter name ${index + 1} to search for`}
+                  disabled={loading || !!currentJobId}
+                  style={{ flex: 1 }}
+                />
+                {searchNames.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearchNames(searchNames.filter((_, i) => i !== index));
+                    }}
+                    disabled={loading || !!currentJobId}
+                    style={{
+                      padding: '8px 12px',
+                      backgroundColor: '#dc3545',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '4px',
+                      cursor: 'pointer',
+                      fontSize: '14px'
+                    }}
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+            ))}
+            <button
+              type="button"
+              onClick={() => setSearchNames([...searchNames, ''])}
               disabled={loading || !!currentJobId}
-            />
+              style={{
+                marginTop: '8px',
+                padding: '8px 16px',
+                backgroundColor: '#28a745',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontSize: '14px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px'
+              }}
+            >
+              + Add Another Name
+            </button>
           </div>
 
           <div style={{ marginTop: '20px', display: 'flex', gap: '10px' }}>
@@ -254,9 +306,23 @@ export default function Home() {
         <div className="card">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
             <h2>Job Status</h2>
-            <span className={`status-badge status-${jobStatus.status}`}>
-              {jobStatus.status.toUpperCase()}
-            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              {jobStatus.retryingErrors && (
+                <span className="alert alert-info" style={{ 
+                  padding: '4px 12px', 
+                  borderRadius: '4px',
+                  fontSize: '14px',
+                  backgroundColor: '#e3f2fd',
+                  color: '#1976d2',
+                  border: '1px solid #90caf9'
+                }}>
+                  🔄 Retrying error dates...
+                </span>
+              )}
+              <span className={`status-badge status-${jobStatus.status}`}>
+                {jobStatus.status.toUpperCase()}
+              </span>
+            </div>
           </div>
 
           <div className="grid" style={{ marginBottom: '20px' }}>
@@ -272,12 +338,16 @@ export default function Home() {
             <div>
               <strong>Total Requests:</strong> {jobStatus.totalRequests}
             </div>
-            {jobStatus.searchName && (
+            {(jobStatus.searchName || (jobStatus.searchNames && jobStatus.searchNames.length > 0)) && (
               <div>
-                <strong>Searching for:</strong> {jobStatus.searchName}
+                <strong>Searching for:</strong> {
+                  jobStatus.searchNames && jobStatus.searchNames.length > 0
+                    ? jobStatus.searchNames.join(', ')
+                    : jobStatus.searchName
+                }
               </div>
             )}
-            {jobStatus.searchName && (
+            {(jobStatus.searchName || (jobStatus.searchNames && jobStatus.searchNames.length > 0)) && (
               <div>
                 <strong>Found Dates:</strong> {jobStatus.foundDates.length}
               </div>
@@ -287,8 +357,18 @@ export default function Home() {
           {jobStatus.errors.length > 0 && (
             <div className="alert alert-error" style={{ marginBottom: '20px' }}>
               <strong>Errors ({jobStatus.errors.length}):</strong>
+              {jobStatus.errorDates && jobStatus.errorDates.length > 0 && (
+                <div style={{ marginTop: '8px', marginBottom: '8px', padding: '8px', backgroundColor: '#fff3cd', borderRadius: '4px' }}>
+                  <strong>Error dates to retry: {jobStatus.errorDates.length}</strong>
+                  {jobStatus.retryingErrors && (
+                    <div style={{ marginTop: '4px', color: '#1976d2' }}>
+                      Currently retrying: {jobStatus.errorDates.join(', ')}
+                    </div>
+                  )}
+                </div>
+              )}
               <ul style={{ marginTop: '8px', marginLeft: '20px' }}>
-                {jobStatus.errors.slice(-5).map((err, idx) => (
+                {jobStatus.errors.slice(-10).map((err, idx) => (
                   <li key={idx}>
                     {err.date}: {err.error}
                   </li>
@@ -297,10 +377,10 @@ export default function Home() {
             </div>
           )}
 
-          {jobStatus.searchName && jobStatus.foundDates.length > 0 && (
+          {(jobStatus.searchName || (jobStatus.searchNames && jobStatus.searchNames.length > 0)) && jobStatus.foundDates.length > 0 && (
             <div style={{ marginTop: '20px' }}>
               <h3 style={{ marginBottom: '16px' }}>
-                Found Records for "{jobStatus.searchName}" 
+                Found Records for "{jobStatus.searchNames && jobStatus.searchNames.length > 0 ? jobStatus.searchNames.join(', ') : jobStatus.searchName}" 
                 <span style={{ fontSize: '14px', fontWeight: 'normal', color: '#666', marginLeft: '10px' }}>
                   ({jobStatus.foundDates.length} date{jobStatus.foundDates.length !== 1 ? 's' : ''} with matches)
                 </span>
@@ -433,13 +513,13 @@ export default function Home() {
             </div>
           )}
 
-          {jobStatus.searchName && jobStatus.foundDates.length === 0 && jobStatus.totalRequests > 0 && (
+          {(jobStatus.searchName || (jobStatus.searchNames && jobStatus.searchNames.length > 0)) && jobStatus.foundDates.length === 0 && jobStatus.totalRequests > 0 && (
             <div className="alert alert-info" style={{ marginTop: '20px' }}>
-              No matches found for "{jobStatus.searchName}" so far. Searching in progress...
+              No matches found for "{(jobStatus.searchNames && jobStatus.searchNames.length > 0 ? jobStatus.searchNames.join(', ') : jobStatus.searchName)}" so far. Searching in progress...
             </div>
           )}
 
-          {jobStatus.allRecords.length > 0 && !jobStatus.searchName && (
+          {jobStatus.allRecords.length > 0 && !jobStatus.searchName && (!jobStatus.searchNames || jobStatus.searchNames.length === 0) && (
             <div style={{ marginTop: '20px' }}>
               <h3 style={{ marginBottom: '16px' }}>All Records ({jobStatus.allRecords.length})</h3>
               <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
