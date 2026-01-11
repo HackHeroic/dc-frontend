@@ -5,6 +5,8 @@ import axios from 'axios';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
+type WebsiteType = 'original' | 'crstn';
+
 interface JobStatus {
   jobId: string;
   searchName: string | null; // Keep for backward compatibility
@@ -44,9 +46,26 @@ interface JobStatus {
   }>;
   errorDates?: string[];
   retryingErrors?: boolean;
+  website?: string; // 'crstn' or undefined for original
+  recordsByDate?: {
+    [date: string]: {
+      date: string;
+      records: Array<{
+        regNo?: string;
+        name: string;
+        gender: string;
+        dateOfDeath: string;
+        fathersName: string;
+        mothersName: string;
+        registrationDate?: string;
+      }>;
+      count: number;
+    };
+  };
 }
 
 export default function Home() {
+  const [activeTab, setActiveTab] = useState<WebsiteType>('original');
   const [verificationNumber, setVerificationNumber] = useState('');
   const [token, setToken] = useState('');
   const [startDate, setStartDate] = useState('');
@@ -59,6 +78,11 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [autoRefresh, setAutoRefresh] = useState(false);
+  
+  // CRSTN-specific fields
+  const [mobileNumber, setMobileNumber] = useState('8825733700');
+  const [dateOfDeath, setDateOfDeath] = useState('');
+  const [crstnGender, setCrstnGender] = useState('M'); // M for Male, F for Female
 
   // Auto-refresh job status
   useEffect(() => {
@@ -91,15 +115,36 @@ export default function Home() {
     setError('');
 
     try {
-      const response = await axios.post(`${API_BASE_URL}/api/start-polling`, {
-        verificationNumber,
-        token: token || undefined, // Only send if provided
-        startDate,
-        endDate,
-        gender,
-        searchNames: searchNames.filter(name => name.trim() !== ''),
-        intervalMinutes: parseInt(intervalMinutes.toString())
-      });
+      const endpoint = activeTab === 'crstn' 
+        ? `${API_BASE_URL}/api/start-polling-crstn`
+        : `${API_BASE_URL}/api/start-polling`;
+      
+      // Validate CRSTN form
+      if (activeTab === 'crstn' && !dateOfDeath && (!startDate || !endDate)) {
+        setError('Please provide either Date of Death or both Start Date and End Date');
+        setLoading(false);
+        return;
+      }
+
+      const payload = activeTab === 'crstn' 
+        ? {
+            mobileNumber: mobileNumber || '8825733700',
+            gender: crstnGender,
+            ...(dateOfDeath ? { dateOfDeath } : { startDate, endDate }),
+            searchNames: searchNames.filter(name => name.trim() !== ''),
+            intervalMinutes: parseInt(intervalMinutes.toString())
+          }
+        : {
+            verificationNumber,
+            token: token || undefined,
+            startDate,
+            endDate,
+            gender,
+            searchNames: searchNames.filter(name => name.trim() !== ''),
+            intervalMinutes: parseInt(intervalMinutes.toString())
+          };
+
+      const response = await axios.post(endpoint, payload);
 
       setCurrentJobId(response.data.jobId);
       setAutoRefresh(true);
@@ -134,6 +179,53 @@ export default function Home() {
     <div className="container">
       <h1 style={{ marginBottom: '30px', color: '#333' }}>Death Certificate Search</h1>
 
+      {/* Tab Navigation */}
+      <div style={{ marginBottom: '20px', borderBottom: '2px solid #ddd' }}>
+        <button
+          type="button"
+          onClick={() => {
+            setActiveTab('original');
+            setCurrentJobId(null);
+            setJobStatus(null);
+            setAutoRefresh(false);
+          }}
+          style={{
+            padding: '12px 24px',
+            border: 'none',
+            background: activeTab === 'original' ? '#4a90e2' : 'transparent',
+            color: activeTab === 'original' ? 'white' : '#666',
+            cursor: 'pointer',
+            fontSize: '16px',
+            fontWeight: activeTab === 'original' ? '600' : '400',
+            borderBottom: activeTab === 'original' ? '3px solid #4a90e2' : '3px solid transparent',
+            marginRight: '8px'
+          }}
+        >
+          Original Website
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setActiveTab('crstn');
+            setCurrentJobId(null);
+            setJobStatus(null);
+            setAutoRefresh(false);
+          }}
+          style={{
+            padding: '12px 24px',
+            border: 'none',
+            background: activeTab === 'crstn' ? '#4a90e2' : 'transparent',
+            color: activeTab === 'crstn' ? 'white' : '#666',
+            cursor: 'pointer',
+            fontSize: '16px',
+            fontWeight: activeTab === 'crstn' ? '600' : '400',
+            borderBottom: activeTab === 'crstn' ? '3px solid #4a90e2' : '3px solid transparent'
+          }}
+        >
+          CRSTN Website
+        </button>
+      </div>
+
       {error && (
         <div className="alert alert-error">
           {error}
@@ -143,86 +235,186 @@ export default function Home() {
       <div className="card">
         <h2 style={{ marginBottom: '20px' }}>Configuration</h2>
         <form onSubmit={handleStartPolling}>
-          <div className="grid">
-            <div className="form-group">
-              <label htmlFor="verificationNumber">Verification Number (optional - will be auto-extracted if not provided)</label>
-              <input
-                id="verificationNumber"
-                type="text"
-                value={verificationNumber}
-                onChange={(e) => setVerificationNumber(e.target.value)}
-                placeholder="Leave empty to auto-extract from website"
-                disabled={loading || !!currentJobId}
-              />
-              <small style={{ color: '#666', fontSize: '12px', display: 'block', marginTop: '4px' }}>
-                If you see a verification number on the website, you can enter it here. Otherwise, the system will automatically extract it.
-              </small>
-            </div>
+          {activeTab === 'original' ? (
+            <>
+              <div className="grid">
+                <div className="form-group">
+                  <label htmlFor="verificationNumber">Verification Number (optional - will be auto-extracted if not provided)</label>
+                  <input
+                    id="verificationNumber"
+                    type="text"
+                    value={verificationNumber}
+                    onChange={(e) => setVerificationNumber(e.target.value)}
+                    placeholder="Leave empty to auto-extract from website"
+                    disabled={loading || !!currentJobId}
+                  />
+                  <small style={{ color: '#666', fontSize: '12px', display: 'block', marginTop: '4px' }}>
+                    If you see a verification number on the website, you can enter it here. Otherwise, the system will automatically extract it.
+                  </small>
+                </div>
 
-            <div className="form-group">
-              <label htmlFor="token">Token (optional - will be auto-fetched if not provided)</label>
-              <input
-                id="token"
-                type="text"
-                value={token}
-                onChange={(e) => setToken(e.target.value)}
-                placeholder="Leave empty to auto-fetch from session"
-                disabled={loading || !!currentJobId}
-              />
-              <small style={{ color: '#666', fontSize: '12px', display: 'block', marginTop: '4px' }}>
-                If you have a token from the website, you can enter it here. Otherwise, the system will automatically fetch it.
-              </small>
-            </div>
+                <div className="form-group">
+                  <label htmlFor="token">Token (optional - will be auto-fetched if not provided)</label>
+                  <input
+                    id="token"
+                    type="text"
+                    value={token}
+                    onChange={(e) => setToken(e.target.value)}
+                    placeholder="Leave empty to auto-fetch from session"
+                    disabled={loading || !!currentJobId}
+                  />
+                  <small style={{ color: '#666', fontSize: '12px', display: 'block', marginTop: '4px' }}>
+                    If you have a token from the website, you can enter it here. Otherwise, the system will automatically fetch it.
+                  </small>
+                </div>
 
-            <div className="form-group">
-              <label htmlFor="startDate">Start Date *</label>
-              <input
-                id="startDate"
-                type="date"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-                required
-                disabled={loading || !!currentJobId}
-              />
-            </div>
+                <div className="form-group">
+                  <label htmlFor="startDate">Start Date *</label>
+                  <input
+                    id="startDate"
+                    type="date"
+                    value={startDate}
+                    onChange={(e) => setStartDate(e.target.value)}
+                    required
+                    disabled={loading || !!currentJobId}
+                  />
+                </div>
 
-            <div className="form-group">
-              <label htmlFor="endDate">End Date *</label>
-              <input
-                id="endDate"
-                type="date"
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-                required
-                disabled={loading || !!currentJobId}
-              />
-            </div>
+                <div className="form-group">
+                  <label htmlFor="endDate">End Date *</label>
+                  <input
+                    id="endDate"
+                    type="date"
+                    value={endDate}
+                    onChange={(e) => setEndDate(e.target.value)}
+                    required
+                    disabled={loading || !!currentJobId}
+                  />
+                </div>
 
-            <div className="form-group">
-              <label htmlFor="gender">Gender</label>
-              <select
-                id="gender"
-                value={gender}
-                onChange={(e) => setGender(e.target.value)}
-                disabled={loading || !!currentJobId}
-              >
-                <option value="male">Male</option>
-                <option value="female">Female</option>
-              </select>
-            </div>
+                <div className="form-group">
+                  <label htmlFor="gender">Gender</label>
+                  <select
+                    id="gender"
+                    value={gender}
+                    onChange={(e) => setGender(e.target.value)}
+                    disabled={loading || !!currentJobId}
+                  >
+                    <option value="male">Male</option>
+                    <option value="female">Female</option>
+                  </select>
+                </div>
 
-            <div className="form-group">
-              <label htmlFor="intervalMinutes">Poll Interval (minutes)</label>
-              <input
-                id="intervalMinutes"
-                type="number"
-                value={intervalMinutes}
-                onChange={(e) => setIntervalMinutes(parseInt(e.target.value) || 60)}
-                min="1"
-                disabled={loading || !!currentJobId}
-              />
-            </div>
-          </div>
+                <div className="form-group">
+                  <label htmlFor="intervalMinutes">Poll Interval (minutes)</label>
+                  <input
+                    id="intervalMinutes"
+                    type="number"
+                    value={intervalMinutes}
+                    onChange={(e) => setIntervalMinutes(parseInt(e.target.value) || 60)}
+                    min="1"
+                    disabled={loading || !!currentJobId}
+                  />
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="grid">
+                <div className="form-group">
+                  <label htmlFor="mobileNumber">Mobile Number *</label>
+                  <input
+                    id="mobileNumber"
+                    type="text"
+                    value={mobileNumber}
+                    onChange={(e) => setMobileNumber(e.target.value)}
+                    placeholder="8825733700"
+                    maxLength={10}
+                    required
+                    disabled={loading || !!currentJobId}
+                  />
+                  <small style={{ color: '#666', fontSize: '12px', display: 'block', marginTop: '4px' }}>
+                    10-digit mobile number (default: 8825733700)
+                  </small>
+                </div>
+
+                <div className="form-group">
+                  <label htmlFor="crstnGender">Gender *</label>
+                  <select
+                    id="crstnGender"
+                    value={crstnGender}
+                    onChange={(e) => setCrstnGender(e.target.value)}
+                    disabled={loading || !!currentJobId}
+                  >
+                    <option value="M">Male</option>
+                    <option value="F">Female</option>
+                    <option value="G">Transgender</option>
+                  </select>
+                </div>
+
+                <div className="form-group">
+                  <label htmlFor="dateOfDeath">Date of Death (for single date search)</label>
+                  <input
+                    id="dateOfDeath"
+                    type="date"
+                    value={dateOfDeath}
+                    onChange={(e) => setDateOfDeath(e.target.value)}
+                    disabled={loading || !!currentJobId}
+                  />
+                  <small style={{ color: '#666', fontSize: '12px', display: 'block', marginTop: '4px' }}>
+                    Enter a single date OR use date range below. If both are provided, single date takes priority.
+                  </small>
+                </div>
+
+                <div className="form-group">
+                  <label htmlFor="startDate">Start Date (for date range search)</label>
+                  <input
+                    id="startDate"
+                    type="date"
+                    value={startDate}
+                    onChange={(e) => setStartDate(e.target.value)}
+                    disabled={loading || !!currentJobId}
+                  />
+                  <small style={{ color: '#666', fontSize: '12px', display: 'block', marginTop: '4px' }}>
+                    Required if Date of Death is not provided
+                  </small>
+                </div>
+
+                <div className="form-group">
+                  <label htmlFor="endDate">End Date (for date range search)</label>
+                  <input
+                    id="endDate"
+                    type="date"
+                    value={endDate}
+                    onChange={(e) => setEndDate(e.target.value)}
+                    disabled={loading || !!currentJobId}
+                  />
+                  <small style={{ color: '#666', fontSize: '12px', display: 'block', marginTop: '4px' }}>
+                    Required if Date of Death is not provided
+                  </small>
+                </div>
+
+                <div className="form-group">
+                  <label htmlFor="intervalMinutes">Poll Interval (minutes)</label>
+                  <input
+                    id="intervalMinutes"
+                    type="number"
+                    value={intervalMinutes}
+                    onChange={(e) => setIntervalMinutes(parseInt(e.target.value) || 60)}
+                    min="1"
+                    disabled={loading || !!currentJobId}
+                  />
+                </div>
+              </div>
+              <div style={{ marginTop: '16px', padding: '12px', backgroundColor: '#e3f2fd', borderRadius: '4px', fontSize: '14px' }}>
+                <strong>Note:</strong> For CRSTN website, the following defaults are used:
+                <ul style={{ marginTop: '8px', marginLeft: '20px' }}>
+                  <li>District: Coimbatore (1005)</li>
+                  <li>Place of Death: Home/Others</li>
+                </ul>
+              </div>
+            </>
+          )}
 
           <div className="form-group">
             <label>Search Names (optional)</label>
@@ -526,23 +718,27 @@ export default function Home() {
                 <table className="table">
                   <thead>
                     <tr>
+                      {jobStatus.website === 'crstn' && <th style={{ width: '120px' }}>Reg No</th>}
                       <th>Date</th>
                       <th>Name</th>
                       <th>Gender</th>
                       <th>Date of Death</th>
                       <th>Father's Name</th>
                       <th>Mother's Name</th>
+                      {jobStatus.website === 'crstn' && <th style={{ width: '120px' }}>Registration Date</th>}
                     </tr>
                   </thead>
                   <tbody>
-                    {jobStatus.allRecords.map((record, idx) => (
+                    {jobStatus.allRecords.map((record: any, idx) => (
                       <tr key={idx}>
+                        {jobStatus.website === 'crstn' && <td style={{ fontSize: '11px' }}>{record.regNo || '-'}</td>}
                         <td>{record.date}</td>
-                        <td>{record.name}</td>
+                        <td><strong>{record.name}</strong></td>
                         <td>{record.gender}</td>
                         <td>{record.dateOfDeath}</td>
-                        <td>{record.fathersName}</td>
-                        <td>{record.mothersName}</td>
+                        <td>{record.fathersName || '-'}</td>
+                        <td>{record.mothersName || '-'}</td>
+                        {jobStatus.website === 'crstn' && <td style={{ fontSize: '11px' }}>{record.registrationDate || '-'}</td>}
                       </tr>
                     ))}
                   </tbody>
@@ -554,6 +750,63 @@ export default function Home() {
           {jobStatus.allRecords.length === 0 && jobStatus.totalRequests > 0 && (
             <div className="alert alert-info">
               No records found yet. Polling in progress...
+            </div>
+          )}
+
+          {/* CRSTN: Show records by date for verification */}
+          {jobStatus.website === 'crstn' && jobStatus.recordsByDate && Object.keys(jobStatus.recordsByDate).length > 0 && (
+            <div style={{ marginTop: '20px' }}>
+              <h3 style={{ marginBottom: '16px' }}>
+                Records by Date (Parsing Verification)
+                <span style={{ fontSize: '14px', fontWeight: 'normal', color: '#666', marginLeft: '10px' }}>
+                  ({Object.keys(jobStatus.recordsByDate).length} date{Object.keys(jobStatus.recordsByDate).length !== 1 ? 's' : ''} processed)
+                </span>
+              </h3>
+              {Object.values(jobStatus.recordsByDate)
+                .sort((a, b) => a.date.localeCompare(b.date))
+                .map((dateData, idx) => (
+                <div key={idx} style={{ marginBottom: '20px', padding: '16px', backgroundColor: '#f0f8ff', borderRadius: '4px', border: '1px solid #4a90e2' }}>
+                  <h4 style={{ marginBottom: '12px', color: '#4a90e2' }}>
+                    Date: {dateData.date}
+                    <span style={{ fontSize: '12px', fontWeight: 'normal', color: '#666', marginLeft: '10px' }}>
+                      ({dateData.count} record{dateData.count !== 1 ? 's' : ''})
+                    </span>
+                  </h4>
+                  <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
+                    <table className="table" style={{ fontSize: '13px' }}>
+                      <thead>
+                        <tr>
+                          <th style={{ width: '80px' }}>Reg No</th>
+                          <th>Name</th>
+                          <th style={{ width: '60px' }}>Gender</th>
+                          <th style={{ width: '100px' }}>Date of Death</th>
+                          <th>Father's Name</th>
+                          <th>Mother's Name</th>
+                          <th style={{ width: '120px' }}>Registration Date</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {dateData.records.slice(0, 20).map((record, recordIdx) => (
+                          <tr key={recordIdx} style={{ backgroundColor: '#fff' }}>
+                            <td style={{ fontSize: '11px' }}>{record.regNo || '-'}</td>
+                            <td><strong>{record.name || '-'}</strong></td>
+                            <td>{record.gender || '-'}</td>
+                            <td>{record.dateOfDeath || '-'}</td>
+                            <td>{record.fathersName || '-'}</td>
+                            <td>{record.mothersName || '-'}</td>
+                            <td style={{ fontSize: '11px' }}>{record.registrationDate || '-'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {dateData.records.length > 20 && (
+                      <div style={{ marginTop: '8px', fontSize: '12px', color: '#666', fontStyle: 'italic' }}>
+                        ... and {dateData.records.length - 20} more records (showing first 20)
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
             </div>
           )}
         </div>
